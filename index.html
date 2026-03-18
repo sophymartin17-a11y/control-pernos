@@ -185,7 +185,12 @@ input[type=file]{display:none;}
   </div>
   <div class="ri">
     <div class="ri-row">
-      <div><div class="ri-num" id="ref-count">0</div><div class="ri-lbl">PERNOS MARCADOS <span id="ref-target" style="color:var(--amber);">/ 17 esperados</span></div></div>
+      <div><div class="ri-num" id="ref-count">0</div><div class="ri-lbl">DETECTADOS <span id="ref-target" style="color:var(--amber);">/ 17 esperados</span></div></div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button onclick="adjCountRef(-1)" style="width:32px;height:32px;background:rgba(255,255,255,0.08);color:#fff;font-size:16px;border-radius:4px;">−</button>
+        <span id="ref-target-num" style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--green);min-width:24px;text-align:center;">17</span>
+        <button onclick="adjCountRef(1)" style="width:32px;height:32px;background:rgba(255,255,255,0.08);color:#fff;font-size:16px;border-radius:4px;">+</button>
+      </div>
       <button class="bb g" style="flex:0;padding:12px 24px;" onclick="confirmRef()">CONFIRMAR</button>
     </div>
     <div class="ri-help" id="ref-help">Pellizca para zoom en modo manual</div>
@@ -290,7 +295,19 @@ const S = {
 // ============================================================
 function adjCount(delta) {
   S.targetCount = Math.max(1, Math.min(99, S.targetCount + delta));
+  syncTargetUI();
+}
+function adjCountRef(delta) {
+  S.targetCount = Math.max(1, Math.min(99, S.targetCount + delta));
+  syncTargetUI();
+  // Re-run detection with new target
+  if (S.refImg && S.editMode === 'auto') autoDetect();
+  else redrawRef();
+}
+function syncTargetUI() {
   document.getElementById('bolt-target').textContent = S.targetCount;
+  const refNum = document.getElementById('ref-target-num');
+  if (refNum) refNum.textContent = S.targetCount;
 }
 
 // ============================================================
@@ -330,6 +347,7 @@ function onPhoto(input, mode) {
       S.bolts = [];
       S.zoom = 1; S.viewX = 0; S.viewY = 0;
       showScreen('ref-edit');
+      syncTargetUI();
       setMode('auto');
       autoDetect();
     } else {
@@ -511,88 +529,20 @@ function autoDetect() {
       }
       if (cnt >= cal.aMin && cnt <= cal.aMax) {
         const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-        const cx = sx / cnt, cy = sy / cnt;
+        const bcx = sx / cnt, bcy = sy / cnt;
         const estR = Math.sqrt(cnt / Math.PI);
-
-        // --- FILTER 1: Aspect ratio of bounding box ---
+        // Only filter: reasonably compact (not a long scratch)
         const aspect = Math.min(bw, bh) / Math.max(bw, bh);
-        if (aspect < 0.5) continue;
-
-        // --- FILTER 2: Real circularity ---
-        // Count how many blob pixels fall inside the ideal circle
-        // centered at centroid with radius estR.
-        // A perfect circle scores 1.0, irregular shapes score lower.
-        const idealArea = Math.PI * estR * estR;
-        const fillRatio = cnt / idealArea; // >1 means blob exceeds ideal circle (spread out)
-        // Also check: how many pixels of the bounding circle are filled
-        const boundCircR = Math.max(bw, bh) / 2;
-        const boundCircArea = Math.PI * boundCircR * boundCircR;
-        const compactness = cnt / boundCircArea;
-        // Bolt should be compact: fills >40% of bounding circle
-        if (compactness < 0.4) continue;
-
-        // --- FILTER 3: Radial gradient (convex metallic surface) ---
-        // Sample brightness (V) in 3 rings: center (0-33%), mid (33-66%), edge (66-100%)
-        // Bolt signature: center brighter than edge
-        let vCenter = 0, nCenter = 0;
-        let vEdge = 0, nEdge = 0;
-        const sampleR = estR * 1.2;
-        const r33 = sampleR * 0.33, r66 = sampleR * 0.66;
-        for (let dy = -Math.ceil(sampleR); dy <= Math.ceil(sampleR); dy++) {
-          for (let dx = -Math.ceil(sampleR); dx <= Math.ceil(sampleR); dx++) {
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist > sampleR) continue;
-            const sx2 = Math.round(cx + dx), sy2 = Math.round(cy + dy);
-            if (sx2 < 0 || sx2 >= w || sy2 < 0 || sy2 >= h) continue;
-            const pi = (sy2 * w + sx2) * 4;
-            const v = rgb2hsv(d[pi], d[pi+1], d[pi+2])[2]; // V channel
-            if (dist <= r33) { vCenter += v; nCenter++; }
-            else if (dist >= r66) { vEdge += v; nEdge++; }
-          }
-        }
-        // Score: positive means center is brighter (expected for convex bolt)
-        let gradientScore = 0;
-        if (nCenter > 0 && nEdge > 0) {
-          const avgCenter = vCenter / nCenter;
-          const avgEdge = vEdge / nEdge;
-          gradientScore = (avgCenter - avgEdge) / Math.max(avgCenter, 1);
-          // Accept: center at least slightly brighter, OR allow flat (some angles)
-          // Reject: edge much brighter than center (inverted = not a bolt)
-          if (gradientScore < -0.15) continue;
-        }
-
-        // --- FILTER 4: Hue consistency ---
-        // Sample hue values within the blob area; they should be in a narrow band
-        let hueSum = 0, hueSqSum = 0, hueN = 0;
-        for (let dy = -Math.ceil(estR); dy <= Math.ceil(estR); dy++) {
-          for (let dx = -Math.ceil(estR); dx <= Math.ceil(estR); dx++) {
-            if (dx*dx + dy*dy > estR*estR) continue;
-            const sx2 = Math.round(cx + dx), sy2 = Math.round(cy + dy);
-            if (sx2 < 0 || sx2 >= w || sy2 < 0 || sy2 >= h) continue;
-            const pi = (sy2 * w + sx2) * 4;
-            const hv = rgb2hsv(d[pi], d[pi+1], d[pi+2])[0];
-            hueSum += hv; hueSqSum += hv * hv; hueN++;
-          }
-        }
-        if (hueN > 5) {
-          const hueMean = hueSum / hueN;
-          const hueStd = Math.sqrt(hueSqSum / hueN - hueMean * hueMean);
-          // Bolt hue should be consistent (std < 12 degrees)
-          if (hueStd > 12) continue;
-        }
-
-        blobs.push({
-          x: cx, y: cy, r: estR, area: cnt,
-          compactness, gradientScore,
-        });
+        if (aspect < 0.35) continue;
+        blobs.push({ x: bcx, y: bcy, r: estR, area: cnt, aspect });
       }
     }
   }
 
-  // Sort by confidence: compactness + gradient score
-  blobs.sort((a, b) => (b.compactness + b.gradientScore) - (a.compactness + a.gradientScore));
+  // Sort by area (bigger = more confident)
+  blobs.sort((a, b) => b.area - a.area);
 
-  // Remove overlapping detections (keep best)
+  // Remove overlapping detections (keep bigger)
   const deduped = [];
   for (const b of blobs) {
     const tooClose = deduped.some(f => {
@@ -604,114 +554,75 @@ function autoDetect() {
 
   // Keep only the top N (target count) best candidates
   let final = deduped.slice(0, S.targetCount);
+  const firstPassCount = final.length;
 
-  // --- ADAPTIVE SECOND PASS ---
-  // If we found fewer than target, learn from what we found and search again with relaxed thresholds
+  // --- SECOND PASS: if we found some but not all, learn and search harder ---
   if (final.length > 0 && final.length < S.targetCount) {
-    // Learn color profile from detected bolts
-    const hsvSamples = [];
     const avgRadius = final.reduce((s, b) => s + b.r, 0) / final.length;
+    // Learn HSV from found bolts
+    const hsvSamples = [];
     final.forEach(b => {
-      const sampleR = Math.round(b.r * 0.6);
-      for (let dy = -sampleR; dy <= sampleR; dy++) {
-        for (let dx = -sampleR; dx <= sampleR; dx++) {
-          if (dx*dx + dy*dy > sampleR*sampleR) continue;
-          const sx = Math.round(b.x + dx), sy = Math.round(b.y + dy);
-          if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
-          const pi = (sy * w + sx) * 4;
-          hsvSamples.push(rgb2hsv(d[pi], d[pi+1], d[pi+2]));
-        }
+      const sr = Math.round(b.r * 0.7);
+      for (let dy = -sr; dy <= sr; dy++) for (let dx = -sr; dx <= sr; dx++) {
+        if (dx*dx + dy*dy > sr*sr) continue;
+        const px2 = Math.round(b.x+dx), py2 = Math.round(b.y+dy);
+        if (px2<0||px2>=w||py2<0||py2>=h) continue;
+        hsvSamples.push(rgb2hsv(d[(py2*w+px2)*4], d[(py2*w+px2)*4+1], d[(py2*w+px2)*4+2]));
       }
     });
+    if (hsvSamples.length > 10) {
+      const sortN = (arr) => arr.slice().sort((a,b)=>a-b);
+      const aH=sortN(hsvSamples.map(x=>x[0])), aS=sortN(hsvSamples.map(x=>x[1])), aV=sortN(hsvSamples.map(x=>x[2]));
+      const p = (arr,pct) => arr[Math.floor(arr.length*pct)];
+      // Very relaxed thresholds
+      const rH0=Math.max(0,Math.floor(p(aH,.03)-10)), rH1=Math.min(180,Math.ceil(p(aH,.97)+10));
+      const rS0=Math.max(0,Math.floor(p(aS,.03)-35));
+      const rV0=Math.max(0,Math.floor(p(aV,.03)-50));
+      const rAmin=Math.max(20, Math.floor(avgRadius*avgRadius*Math.PI*0.15));
+      const rAmax=Math.ceil(avgRadius*avgRadius*Math.PI*6);
 
-    if (hsvSamples.length > 20) {
-      // Compute actual HSV range from found bolts with generous margin
-      const allH = hsvSamples.map(x => x[0]).sort((a,b) => a-b);
-      const allS = hsvSamples.map(x => x[1]).sort((a,b) => a-b);
-      const allV = hsvSamples.map(x => x[2]).sort((a,b) => a-b);
-      // Use percentile 5-95 to ignore outliers
-      const p5 = Math.floor(allH.length * 0.05), p95 = Math.floor(allH.length * 0.95);
-      const learnedH = [allH[p5], allH[p95]];
-      const learnedS = [allS[p5], allS[p95]];
-      const learnedV = [allV[p5], allV[p95]];
-
-      // Relaxed thresholds based on learned profile
-      const rCal = {
-        hMin: Math.max(0, Math.floor(learnedH[0] - 8)),
-        hMax: Math.min(180, Math.ceil(learnedH[1] + 8)),
-        sMin: Math.max(0, Math.floor(learnedS[0] - 30)),
-        vMin: Math.max(0, Math.floor(learnedV[0] - 40)),
-        // Relaxed area based on found bolts
-        aMin: Math.max(30, Math.floor(avgRadius * avgRadius * Math.PI * 0.2)),
-        aMax: Math.ceil(avgRadius * avgRadius * Math.PI * 5),
-      };
-
-      // Build new mask with relaxed thresholds
-      const mask2 = new Uint8Array(w * h);
-      for (let i = 0; i < d.length; i += 4) {
-        const [hue, sat, val] = rgb2hsv(d[i], d[i+1], d[i+2]);
-        let inR = hue >= rCal.hMin && hue <= rCal.hMax && sat >= rCal.sMin && val >= rCal.vMin;
-        if (!inR && rCal.hMin < 10) inR = hue >= 170 && sat >= rCal.sMin && val >= rCal.vMin;
-        if (inR) mask2[i >> 2] = 1;
+      // New mask
+      const m2 = new Uint8Array(w*h);
+      for (let i=0;i<d.length;i+=4) {
+        const [hue,sat,val]=rgb2hsv(d[i],d[i+1],d[i+2]);
+        let ok=hue>=rH0&&hue<=rH1&&sat>=rS0&&val>=rV0;
+        if(!ok&&rH0<10) ok=hue>=170&&sat>=rS0&&val>=rV0;
+        if(ok) m2[i>>2]=1;
       }
-
-      // Morphological close
-      const dil2 = new Uint8Array(w * h);
-      for (let py = 1; py < h-1; py++) for (let px = 1; px < w-1; px++) {
-        const idx = py*w+px;
-        if (mask2[idx]||mask2[idx-1]||mask2[idx+1]||mask2[idx-w]||mask2[idx+w]||
-            mask2[idx-w-1]||mask2[idx-w+1]||mask2[idx+w-1]||mask2[idx+w+1]) dil2[idx]=1;
-      }
-      const cls2 = new Uint8Array(w * h);
-      for (let py = 1; py < h-1; py++) for (let px = 1; px < w-1; px++) {
-        const idx = py*w+px;
-        if (dil2[idx]&&dil2[idx-1]&&dil2[idx+1]&&dil2[idx-w]&&dil2[idx+w]) cls2[idx]=1;
-      }
-
-      // Flood-fill with relaxed size filter but stricter shape (must be similar to found bolts)
-      const vis2 = new Uint8Array(w * h);
-      const extra = [];
-      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
-        const idx = py*w+px;
-        if (!cls2[idx] || vis2[idx]) continue;
-        const queue = [idx]; vis2[idx] = 1;
-        let sx2=0,sy2=0,cnt=0,x0b=px,x1b=px,y0b=py,y1b=py;
-        while (queue.length) {
-          const ci=queue.pop(),cx2=ci%w,cy2=(ci-cx2)/w;
-          sx2+=cx2;sy2+=cy2;cnt++;
-          if(cx2<x0b)x0b=cx2;if(cx2>x1b)x1b=cx2;if(cy2<y0b)y0b=cy2;if(cy2>y1b)y1b=cy2;
+      // Dilate+erode
+      const d2=new Uint8Array(w*h);
+      for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){const i=y*w+x;
+        if(m2[i]||m2[i-1]||m2[i+1]||m2[i-w]||m2[i+w]||m2[i-w-1]||m2[i-w+1]||m2[i+w-1]||m2[i+w+1])d2[i]=1;}
+      const c2=new Uint8Array(w*h);
+      for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){const i=y*w+x;
+        if(d2[i]&&d2[i-1]&&d2[i+1]&&d2[i-w]&&d2[i+w])c2[i]=1;}
+      // Flood fill
+      const v2=new Uint8Array(w*h);
+      const extra=[];
+      for(let py2=0;py2<h;py2++) for(let px2=0;px2<w;px2++){
+        const idx=py2*w+px2; if(!c2[idx]||v2[idx]) continue;
+        const q=[idx]; v2[idx]=1;
+        let sx2=0,sy2=0,cnt2=0,xa=px2,xb=px2,ya=py2,yb=py2;
+        while(q.length){const ci=q.pop(),cx2=ci%w,cy2=(ci-cx2)/w;
+          sx2+=cx2;sy2+=cy2;cnt2++;
+          if(cx2<xa)xa=cx2;if(cx2>xb)xb=cx2;if(cy2<ya)ya=cy2;if(cy2>yb)yb=cy2;
           const nb=[cy2>0?ci-w:-1,cy2<h-1?ci+w:-1,cx2>0?ci-1:-1,cx2<w-1?ci+1:-1];
-          for(const ni of nb){if(ni>=0&&cls2[ni]&&!vis2[ni]){vis2[ni]=1;queue.push(ni);}}
-        }
-        if (cnt < rCal.aMin || cnt > rCal.aMax) continue;
-        const bw2=x1b-x0b+1, bh2=y1b-y0b+1;
-        const aspect2=Math.min(bw2,bh2)/Math.max(bw2,bh2);
-        if (aspect2 < 0.4) continue;
-        const bcR2=Math.max(bw2,bh2)/2;
-        const comp2=cnt/(Math.PI*bcR2*bcR2);
-        if (comp2 < 0.3) continue;
-        const ecx=sx2/cnt, ecy=sy2/cnt, er=Math.sqrt(cnt/Math.PI);
-        // Size must be similar to found bolts (within 3x)
-        if (er < avgRadius * 0.3 || er > avgRadius * 3) continue;
-        // Must not overlap with already found bolts
-        const overlap = final.some(f => Math.sqrt((f.x-ecx)**2+(f.y-ecy)**2) < Math.max(f.r,er)*1.5);
-        if (overlap) continue;
-        extra.push({ x:ecx, y:ecy, r:er, area:cnt, compactness:comp2, gradientScore:0 });
+          for(const ni of nb){if(ni>=0&&c2[ni]&&!v2[ni]){v2[ni]=1;q.push(ni);}}}
+        if(cnt2<rAmin||cnt2>rAmax) continue;
+        const bw2=xb-xa+1,bh2=yb-ya+1;
+        if(Math.min(bw2,bh2)/Math.max(bw2,bh2)<0.3) continue;
+        const ecx=sx2/cnt2,ecy=sy2/cnt2,er=Math.sqrt(cnt2/Math.PI);
+        if(er<avgRadius*0.25||er>avgRadius*4) continue;
+        // Skip if overlaps existing
+        if(final.some(f=>Math.sqrt((f.x-ecx)**2+(f.y-ecy)**2)<Math.max(f.r,er)*1.5)) continue;
+        extra.push({x:ecx,y:ecy,r:er,area:cnt2,aspect:Math.min(bw2,bh2)/Math.max(bw2,bh2)});
       }
-
-      // Sort extras by how similar their radius is to the average
-      extra.sort((a,b) => Math.abs(a.r-avgRadius) - Math.abs(b.r-avgRadius));
-
-      // Dedupe extras
-      const extraDeduped = [];
-      for (const b of extra) {
-        const tooClose = extraDeduped.some(f => Math.sqrt((f.x-b.x)**2+(f.y-b.y)**2) < Math.max(f.r,b.r)*1.5);
-        if (!tooClose) extraDeduped.push(b);
-      }
-
-      // Add extras until we reach target
-      const needed = S.targetCount - final.length;
-      final = final.concat(extraDeduped.slice(0, needed));
+      // Sort by similarity to average bolt size
+      extra.sort((a,b)=>Math.abs(a.r-avgRadius)-Math.abs(b.r-avgRadius));
+      // Dedupe
+      const ed=[];
+      for(const b of extra){if(!ed.some(f=>Math.sqrt((f.x-b.x)**2+(f.y-b.y)**2)<Math.max(f.r,b.r)*1.5)) ed.push(b);}
+      final=final.concat(ed.slice(0, S.targetCount-final.length));
     }
   }
 
@@ -719,6 +630,29 @@ function autoDetect() {
   const rowH = h * 0.06;
   final.sort((a,b) => { const ra=Math.round(a.y/rowH),rb=Math.round(b.y/rowH); return ra!==rb?ra-rb:a.x-b.x; });
   S.bolts = final.map((b,i) => ({ x:b.x, y:b.y, r:b.r, id:i+1, nx:b.x/w, ny:b.y/h }));
+
+  // Update help text with detection info
+  const secondPassFound = final.length - firstPassCount;
+  const helpEl = document.getElementById('ref-help');
+  if (S.editMode === 'auto') {
+    if (final.length === S.targetCount) {
+      helpEl.textContent = firstPassCount + ' detectados' +
+        (secondPassFound > 0 ? ' + ' + secondPassFound + ' en 2o pase (umbral relajado)' : '') +
+        '. Todos encontrados!';
+      helpEl.style.color = 'var(--green)';
+    } else if (final.length > 0) {
+      helpEl.textContent = firstPassCount + ' detectados' +
+        (secondPassFound > 0 ? ' + ' + secondPassFound + ' en 2o pase' : '') +
+        '. Faltan ' + (S.targetCount - final.length) + '. Usa MANUAL o MUESTREAR.';
+      helpEl.style.color = 'var(--amber)';
+    } else {
+      helpEl.textContent = 'No se detectaron pernos. Prueba AMPLIO o MUESTREAR.';
+      helpEl.style.color = 'var(--red)';
+    }
+  } else {
+    helpEl.style.color = '';
+  }
+
   redrawRef();
 }
 
@@ -1007,6 +941,8 @@ function redrawRef() {
   document.getElementById('ref-count').style.color = n === t ? 'var(--green)' : n > 0 ? 'var(--amber)' : 'var(--red)';
   document.getElementById('badge-ref').textContent = n + ' / ' + t + ' pernos';
   document.getElementById('ref-target').textContent = '/ ' + t + ' esperados';
+  const rtn = document.getElementById('ref-target-num');
+  if (rtn) rtn.textContent = t;
 }
 
 // ============================================================
