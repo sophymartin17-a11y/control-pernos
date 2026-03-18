@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Control Pernos — IA</title>
+<meta name="theme-color" content="#0a0c0b">
+<style>
+:root{--green:#00e676;--red:#ff3d3d;--amber:#ffab00;--dim:#5a6e60;--bg:#0a0c0b;--surface:rgba(10,12,11,0.95);--border:rgba(255,255,255,0.1);--font:-apple-system,'Segoe UI',system-ui,sans-serif;--mono:'Courier New',monospace;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:#dde8e0;font-family:var(--font);}
+button{font-family:var(--font);cursor:pointer;border:none;}
+button:active{transform:scale(0.97);}
+input[type=file]{display:none;}
+.screen{position:fixed;inset:0;z-index:10;display:none;flex-direction:column;}
+.screen.active{display:flex;}
+
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);z-index:20;backdrop-filter:blur(8px);flex-shrink:0;}
+.hdr-t{font-weight:700;font-size:15px;letter-spacing:1px;}
+.hdr-s{font-size:10px;color:var(--dim);letter-spacing:1px;}
+.hdr-btn{background:transparent;color:var(--dim);font-size:12px;padding:6px 12px;border:1px solid var(--border);border-radius:4px;letter-spacing:1px;}
+
+.card{text-align:center;padding:32px 24px;max-width:420px;width:100%;}
+.card-title{font-size:26px;font-weight:800;letter-spacing:2px;color:var(--green);margin-bottom:4px;}
+.card-sub{font-size:11px;color:var(--dim);letter-spacing:2px;margin-bottom:24px;}
+.field{text-align:left;margin-bottom:16px;}
+.field label{display:block;font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:6px;}
+.field input{width:100%;background:#0d0f0e;border:1px solid var(--border);border-radius:6px;color:#dde8e0;font-family:var(--mono);font-size:13px;padding:12px 14px;outline:none;}
+.field input:focus{border-color:var(--green);}
+.field .hint{font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5;}
+.field .hint a{color:var(--green);text-decoration:none;}
+.btn-big{width:100%;padding:16px;background:var(--green);color:#0a0c0b;font-weight:700;font-size:16px;letter-spacing:2px;border-radius:6px;}
+.btn-big:disabled{opacity:0.4;cursor:not-allowed;}
+.btn-sec{width:100%;padding:14px;background:transparent;color:var(--dim);font-size:13px;letter-spacing:1px;border-radius:6px;border:1px solid var(--border);margin-top:10px;}
+
+.pv{flex:1;position:relative;overflow:hidden;background:#000;}
+.pv canvas,.pv img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;}
+.bar{display:flex;gap:10px;padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
+.bb{flex:1;padding:14px;font-weight:700;font-size:15px;letter-spacing:2px;border-radius:6px;text-align:center;}
+.bb.g{background:var(--green);color:#0a0c0b;}
+.bb.o{background:transparent;border:1px solid var(--border);color:var(--dim);font-size:13px;font-weight:400;}
+
+.scan-area{flex:1;position:relative;overflow:hidden;background:#000;}
+.scan-area video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+
+.proc{position:absolute;inset:0;z-index:10;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;}
+.proc.on{display:flex;}
+.spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.proc-t{font-size:12px;color:var(--green);letter-spacing:3px;animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+.res-panel{padding:16px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
+.res-big{font-size:52px;font-weight:900;letter-spacing:4px;text-align:center;padding:8px 0;}
+.res-big.ok{color:var(--green);text-shadow:0 0 40px rgba(0,230,118,0.3);}
+.res-big.nok{color:var(--red);text-shadow:0 0 40px rgba(255,61,61,0.3);}
+.res-det{font-size:13px;color:rgba(255,255,255,0.5);text-align:center;margin-bottom:4px;}
+.res-miss{font-size:14px;color:var(--red);text-align:center;margin-bottom:8px;font-weight:600;}
+.res-conf{font-size:11px;color:var(--dim);text-align:center;margin-bottom:12px;}
+
+.hl{flex:1;overflow-y:auto;padding:0 16px;}
+.hi{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px;}
+.hb{padding:2px 8px;border-radius:3px;font-weight:700;font-size:11px;letter-spacing:1px;flex-shrink:0;}
+.hb.ok{background:rgba(0,230,118,0.12);color:var(--green);}
+.hb.nok{background:rgba(255,61,61,0.12);color:var(--red);}
+.ht{color:var(--dim);flex-shrink:0;}
+.hd{flex:1;color:rgba(255,255,255,0.45);}
+
+.count-ctrl{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;}
+.count-ctrl label{font-size:13px;color:var(--dim);letter-spacing:1px;white-space:nowrap;}
+.count-ctrl button{width:40px;height:40px;background:rgba(255,255,255,0.08);color:#fff;font-size:20px;border-radius:6px;}
+.count-val{flex:1;text-align:center;font-size:32px;font-weight:800;color:var(--green);font-family:var(--mono);}
+</style>
+</head>
+<body>
+
+<!-- SETUP -->
+<div class="screen active" id="setup">
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;">
+    <div class="card">
+      <div class="card-title">CONTROL PERNOS</div>
+      <div class="card-sub">VERSION IA · GROQ</div>
+      <div class="field">
+        <label>GROQ API KEY</label>
+        <input id="api-key" type="password" placeholder="gsk_..." autocomplete="off">
+        <div class="hint">Key gratuita en <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a></div>
+      </div>
+      <div class="count-ctrl">
+        <label>PERNOS:</label>
+        <button onclick="adj(-1)">−</button>
+        <div class="count-val" id="count-val">17</div>
+        <button onclick="adj(1)">+</button>
+      </div>
+      <button class="btn-big" id="btn-start" onclick="saveSetup()">COMENZAR</button>
+      <div id="setup-err" style="margin-top:10px;padding:8px 12px;background:rgba(255,61,61,0.1);border:1px solid rgba(255,61,61,0.3);border-radius:4px;font-size:11px;color:var(--red);display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- REFERENCE -->
+<div class="screen" id="ref-screen">
+  <div class="hdr">
+    <div><div class="hdr-t">REFERENCIA</div><div class="hdr-s">FOTO DE PIEZA OK</div></div>
+    <button class="hdr-btn" onclick="triggerPhoto('ref')">REPETIR</button>
+  </div>
+  <div class="pv"><canvas id="cv-ref"></canvas></div>
+  <div class="bar">
+    <button class="bb g" onclick="confirmRef()">CONFIRMAR REFERENCIA</button>
+  </div>
+</div>
+
+<!-- INSPECT -->
+<div class="screen" id="inspect">
+  <div class="hdr">
+    <div><div class="hdr-t">INSPECCION</div><div class="hdr-s" id="insp-sub">17 pernos esperados</div></div>
+    <button class="hdr-btn" onclick="showScreen('history')">HISTORIAL</button>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px;">
+    <div style="text-align:center;width:100%;max-width:400px;">
+      <div style="font-size:64px;opacity:0.06;margin-bottom:12px;">&#128247;</div>
+      <div style="font-size:13px;color:rgba(255,255,255,0.35);margin-bottom:24px;line-height:1.8;">
+        Haz una foto de la pieza a inspeccionar.<br>La IA analizara si todos los pernos estan presentes.
+      </div>
+      <button class="btn-big" onclick="triggerPhoto('scan')" style="font-size:18px;">ESCANEAR PIEZA</button>
+      <div style="margin-top:14px;display:flex;gap:10px;">
+        <button class="btn-sec" onclick="triggerPhoto('ref')" style="flex:1;">NUEVA REF</button>
+        <button class="btn-sec" onclick="showScreen('history')" style="flex:1;">HISTORIAL</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ANALYZING -->
+<div class="screen" id="analyzing">
+  <div class="hdr">
+    <div><div class="hdr-t">ANALIZANDO</div><div class="hdr-s">ENVIANDO A GROQ...</div></div>
+  </div>
+  <div class="pv">
+    <canvas id="cv-scan"></canvas>
+    <div class="proc on">
+      <div class="spinner"></div>
+      <div class="proc-t">ANALIZANDO CON IA...</div>
+      <div id="analyze-status" style="font-size:10px;color:var(--dim);letter-spacing:1px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div class="screen" id="results">
+  <div class="hdr">
+    <div><div class="hdr-t">RESULTADO</div><div class="hdr-s" id="res-time"></div></div>
+  </div>
+  <div class="pv"><canvas id="cv-res"></canvas></div>
+  <div class="res-panel">
+    <div class="res-big" id="res-verdict"></div>
+    <div class="res-det" id="res-det"></div>
+    <div class="res-miss" id="res-miss"></div>
+    <div class="res-conf" id="res-conf"></div>
+    <div class="bar">
+      <button class="bb g" onclick="triggerPhoto('scan')">SIGUIENTE</button>
+      <button class="bb o" onclick="exportPhoto()" style="flex:0.5;">GUARDAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY -->
+<div class="screen" id="history">
+  <div class="hdr">
+    <div><div class="hdr-t">HISTORIAL</div><div class="hdr-s" id="hist-sum"></div></div>
+    <button class="hdr-btn" onclick="showScreen('inspect')">CERRAR</button>
+  </div>
+  <div class="hl" id="hist-list"></div>
+  <div class="bar">
+    <button class="bb o" onclick="exportCSV()">EXPORTAR CSV</button>
+  </div>
+</div>
+
+<!-- Hidden -->
+<input type="file" id="input-ref" accept="image/*" capture="environment" onchange="onPhoto(this,'ref')">
+<input type="file" id="input-scan" accept="image/*" capture="environment" onchange="onPhoto(this,'scan')">
+<canvas id="cv-work" style="display:none;"></canvas>
+
+<script>
+// ============================================================
+//  STATE
+// ============================================================
+let S = {
+  apiKey: localStorage.getItem('groq_key') || '',
+  target: +(localStorage.getItem('groq_target') || 17),
+  refB64: null,     // base64 JPEG of reference
+  history: JSON.parse(localStorage.getItem('groq_hist') || '[]'),
+};
+
+// ============================================================
+//  SETUP
+// ============================================================
+function adj(d) {
+  S.target = Math.max(1, Math.min(99, S.target + d));
+  document.getElementById('count-val').textContent = S.target;
+}
+
+function saveSetup() {
+  const key = document.getElementById('api-key').value.trim();
+  if (!key.startsWith('gsk_')) {
+    showErr('La API key debe empezar por gsk_');
+    return;
+  }
+  S.apiKey = key;
+  localStorage.setItem('groq_key', key);
+  localStorage.setItem('groq_target', S.target);
+  // If we have a saved reference, go to inspect
+  if (localStorage.getItem('groq_ref')) {
+    S.refB64 = localStorage.getItem('groq_ref');
+    goInspect();
+  } else {
+    triggerPhoto('ref');
+  }
+}
+
+function showErr(msg) {
+  const el = document.getElementById('setup-err');
+  el.textContent = msg; el.style.display = '';
+  setTimeout(() => el.style.display = 'none', 4000);
+}
+
+// ============================================================
+//  NAVIGATION
+// ============================================================
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id === 'history') renderHist();
+}
+
+function goInspect() {
+  document.getElementById('insp-sub').textContent = S.target + ' pernos esperados';
+  showScreen('inspect');
+}
+
+// ============================================================
+//  PHOTO
+// ============================================================
+function triggerPhoto(mode) {
+  const el = document.getElementById('input-' + mode);
+  el.value = ''; el.click();
+}
+
+function onPhoto(input, mode) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // Resize for API (max 1200px, keep aspect)
+      let w = img.width, h = img.height;
+      const MAX = 1200;
+      if (Math.max(w, h) > MAX) {
+        const sc = MAX / Math.max(w, h);
+        w = Math.round(w * sc); h = Math.round(h * sc);
+      }
+      const cv = document.getElementById('cv-work');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      const b64 = cv.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+      if (mode === 'ref') {
+        S.refB64 = b64;
+        localStorage.setItem('groq_ref', b64);
+        // Show reference preview
+        const cvRef = document.getElementById('cv-ref');
+        cvRef.width = w; cvRef.height = h;
+        cvRef.getContext('2d').drawImage(img, 0, 0, w, h);
+        showScreen('ref-screen');
+      } else {
+        analyzeScan(b64, w, h, img);
+      }
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function confirmRef() {
+  goInspect();
+}
+
+// ============================================================
+//  ANALYZE WITH GROQ
+// ============================================================
+async function analyzeScan(scanB64, w, h, img) {
+  // Show scan preview
+  const cvScan = document.getElementById('cv-scan');
+  cvScan.width = w; cvScan.height = h;
+  cvScan.getContext('2d').drawImage(img, 0, 0, w, h);
+  showScreen('analyzing');
+
+  const prompt = `Eres un sistema de control de calidad visual en una fabrica.
+
+Analiza esta imagen de una pieza metalica (chapa gris) que debe tener exactamente ${S.target} pernos soldados.
+
+Los pernos son pequenos vastagos metalicos de color cobrizo/dorado que sobresalen de la superficie gris de la chapa. Tienen ~4mm de diametro.
+
+${S.refB64 ? 'La primera imagen es la REFERENCIA (pieza correcta con todos los pernos). La segunda imagen es la pieza a INSPECCIONAR.' : 'Cuenta todos los pernos visibles en la imagen.'}
+
+Tareas:
+1. Cuenta cuantos pernos ves en la pieza a inspeccionar
+2. Determina si hay exactamente ${S.target} pernos
+3. Si faltan, describe DONDE faltan (arriba-izquierda, centro, abajo-derecha, etc.)
+
+Responde SOLO con JSON valido:
+{
+  "pernos_encontrados": <numero>,
+  "pernos_esperados": ${S.target},
+  "ok": <true si encontrados == esperados>,
+  "faltantes": ["descripcion posicion 1", ...],
+  "confianza": "alta|media|baja",
+  "notas": "observacion breve"
+}`;
+
+  const messages = [{
+    role: 'user',
+    content: []
+  }];
+
+  // Add reference image if available
+  if (S.refB64) {
+    messages[0].content.push({
+      type: 'image_url',
+      image_url: { url: 'data:image/jpeg;base64,' + S.refB64 }
+    });
+  }
+  // Add scan image
+  messages[0].content.push({
+    type: 'image_url',
+    image_url: { url: 'data:image/jpeg;base64,' + scanB64 }
+  });
+  messages[0].content.push({ type: 'text', text: prompt });
+
+  document.getElementById('analyze-status').textContent = 'Enviando imagen...';
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + S.apiKey
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: messages,
+        temperature: 0.05,
+        max_tokens: 500,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error?.message || 'Error ' + res.status);
+    }
+
+    document.getElementById('analyze-status').textContent = 'Procesando respuesta...';
+    const data = await res.json();
+    const content = data.choices[0].message.content;
+    const result = JSON.parse(content);
+    showResults(result, scanB64, w, h);
+
+  } catch (e) {
+    alert('Error Groq: ' + e.message);
+    goInspect();
+  }
+}
+
+// ============================================================
+//  RESULTS
+// ============================================================
+function showResults(result, scanB64, w, h) {
+  const canvas = document.getElementById('cv-res');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0, w, h);
+
+    // Draw big verdict watermark
+    const ok = result.ok;
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = ok ? '#00e676' : '#ff3d3d';
+    ctx.font = `bold ${Math.round(w * 0.3)}px -apple-system, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(ok ? 'OK' : 'NOK', w/2, h/2 + w*0.1);
+    ctx.globalAlpha = 1;
+
+    // Draw count badge
+    ctx.fillStyle = ok ? 'rgba(0,100,0,0.8)' : 'rgba(100,0,0,0.8)';
+    const badgeW = 200, badgeH = 40;
+    ctx.fillRect(w/2 - badgeW/2, 10, badgeW, badgeH);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold 18px -apple-system, system-ui, sans-serif`;
+    ctx.fillText(result.pernos_encontrados + ' / ' + S.target, w/2, 36);
+    ctx.textAlign = 'left';
+
+    showScreen('results');
+  };
+  img.src = 'data:image/jpeg;base64,' + scanB64;
+
+  const ok = result.ok;
+  const found = result.pernos_encontrados || 0;
+
+  document.getElementById('res-verdict').textContent = ok ? 'OK' : 'NOK';
+  document.getElementById('res-verdict').className = 'res-big ' + (ok ? 'ok' : 'nok');
+  document.getElementById('res-det').textContent = found + ' / ' + S.target + ' pernos detectados';
+  document.getElementById('res-miss').textContent =
+    result.faltantes && result.faltantes.length > 0
+      ? 'FALTAN EN: ' + result.faltantes.join(', ')
+      : '';
+  document.getElementById('res-conf').textContent =
+    'Confianza: ' + (result.confianza || '?') +
+    (result.notas ? ' · ' + result.notas : '');
+
+  const now = new Date();
+  document.getElementById('res-time').textContent =
+    now.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+  S.history.unshift({
+    time: now.toISOString(),
+    ok: ok,
+    found: found,
+    total: S.target,
+    missing: result.faltantes || [],
+    confidence: result.confianza || '?',
+  });
+  localStorage.setItem('groq_hist', JSON.stringify(S.history.slice(0, 200)));
+}
+
+function exportPhoto() {
+  const c = document.getElementById('cv-res');
+  const a = document.createElement('a');
+  a.download = 'qc-' + new Date().toISOString().replace(/[:.]/g,'-') + '.jpg';
+  a.href = c.toDataURL('image/jpeg', 0.92);
+  a.click();
+}
+
+// ============================================================
+//  HISTORY
+// ============================================================
+function renderHist() {
+  const ok = S.history.filter(h => h.ok).length;
+  document.getElementById('hist-sum').textContent =
+    S.history.length + ' insp. · ' + ok + ' OK · ' + (S.history.length-ok) + ' NOK';
+  document.getElementById('hist-list').innerHTML = S.history.length === 0
+    ? '<div style="padding:40px;text-align:center;color:var(--dim)">Sin inspecciones</div>'
+    : S.history.map(h => {
+      const t = new Date(h.time);
+      return '<div class="hi"><span class="hb '+(h.ok?'ok':'nok')+'">'+(h.ok?'OK':'NOK')+'</span>'+
+        '<span class="ht">'+t.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit'})+' '+
+        t.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})+'</span>'+
+        '<span class="hd">'+h.found+'/'+h.total+
+        (h.missing.length?' · '+h.missing.join(', '):'')+'</span></div>';
+    }).join('');
+}
+
+function exportCSV() {
+  let csv = 'Fecha,Hora,Resultado,Encontrados,Total,Confianza,Faltantes\n';
+  S.history.forEach(h => {
+    const t = new Date(h.time);
+    csv += [t.toLocaleDateString('es-ES'),t.toLocaleTimeString('es-ES'),
+      h.ok?'OK':'NOK',h.found,h.total,h.confidence,
+      h.missing.length?h.missing.join(' | '):'-'].join(',')+'\n';
+  });
+  const a = document.createElement('a');
+  a.download = 'historial-qc-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.click();
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+(function() {
+  // Restore state
+  if (S.apiKey) {
+    document.getElementById('api-key').value = S.apiKey;
+  }
+  document.getElementById('count-val').textContent = S.target;
+
+  // If already configured, skip setup
+  if (S.apiKey && localStorage.getItem('groq_ref')) {
+    S.refB64 = localStorage.getItem('groq_ref');
+    goInspect();
+  }
+})();
+</script>
+</body>
+</html>
