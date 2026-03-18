@@ -343,7 +343,7 @@ function onPhoto(input, mode) {
   loadImageFile(file, (imgData, w, h, dataURL) => {
     if (mode === 'ref') {
       S.refImg = imgData; S.refW = w; S.refH = h; S.refDataURL = dataURL;
-      S._refCanvas = null; // invalidate cache
+      S._refCanvas = null; S._refBounds = null; // invalidate cache
       S.bolts = [];
       S.zoom = 1; S.viewX = 0; S.viewY = 0;
       showScreen('ref-edit');
@@ -1095,16 +1095,95 @@ function captureAndAnalyze() {
 }
 
 // ============================================================
-//  SCAN PROCESSING — ZONE-BASED
+//  PIECE BOUNDARY DETECTION
+//  Finds the bounding box of the metal piece in an image.
+//  The piece is a gray rectangle — we look for the largest
+//  region that is NOT background (dark/colored edges).
+// ============================================================
+function detectPieceBounds(imgData, w, h) {
+  const d = imgData.data;
+  // Strategy: scan rows/cols to find where the gray metal starts/ends.
+  // Gray metal: low saturation (S < 40), medium-high value (V > 60).
+  // We find the bounding box where >30% of pixels in a row/col are "gray metal".
+
+  const isGray = (i) => {
+    const [hue, sat, val] = rgb2hsv(d[i], d[i+1], d[i+2]);
+    return sat < 50 && val > 50 && val < 240;
+  };
+
+  const threshold = 0.25; // 25% of row/col must be gray
+
+  // Find top edge
+  let top = 0;
+  for (let y = 0; y < h; y++) {
+    let count = 0;
+    for (let x = 0; x < w; x += 3) { if (isGray((y*w+x)*4)) count++; }
+    if (count / (w/3) > threshold) { top = y; break; }
+  }
+  // Find bottom edge
+  let bottom = h - 1;
+  for (let y = h-1; y >= top; y--) {
+    let count = 0;
+    for (let x = 0; x < w; x += 3) { if (isGray((y*w+x)*4)) count++; }
+    if (count / (w/3) > threshold) { bottom = y; break; }
+  }
+  // Find left edge
+  let left = 0;
+  for (let x = 0; x < w; x++) {
+    let count = 0;
+    for (let y = top; y <= bottom; y += 3) { if (isGray((y*w+x)*4)) count++; }
+    if (count / ((bottom-top)/3) > threshold) { left = x; break; }
+  }
+  // Find right edge
+  let right = w - 1;
+  for (let x = w-1; x >= left; x--) {
+    let count = 0;
+    for (let y = top; y <= bottom; y += 3) { if (isGray((y*w+x)*4)) count++; }
+    if (count / ((bottom-top)/3) > threshold) { right = x; break; }
+  }
+
+  // Sanity check: piece should be at least 30% of image
+  const pw = right - left, ph = bottom - top;
+  if (pw < w * 0.3 || ph < h * 0.3) {
+    // Fallback: use full image
+    return { left: 0, top: 0, right: w-1, bottom: h-1, w: w, h: h };
+  }
+  return { left, top, right, bottom, w: pw, h: ph };
+}
+
+// ============================================================
+//  SCAN PROCESSING — ZONE-BASED with piece alignment
 // ============================================================
 function processScan(imgData, w, h) {
   const cal = S.calib;
   const d = imgData.data;
   const matched = [], missing = [];
+
+  // Detect piece bounds in scan image
+  const scanBounds = detectPieceBounds(imgData, w, h);
+
+  // Detect piece bounds in reference image (cached)
+  if (!S._refBounds && S.refImg) {
+    S._refBounds = detectPieceBounds(S.refImg, S.refW, S.refH);
+  }
+  const refBounds = S._refBounds || { left:0, top:0, right:S.refW-1, bottom:S.refH-1, w:S.refW, h:S.refH };
+
+  // For each bolt, convert ref position → piece-relative → scan position
   const searchPx = cal.searchR * (w / 400);
+  const mappedPositions = {}; // id → {x, y} in scan pixels
 
   S.bolts.forEach(ref => {
-    const cx = Math.round(ref.nx * w), cy = Math.round(ref.ny * h);
+    // Bolt position in ref image pixels
+    const refPx = ref.nx * S.refW;
+    const refPy = ref.ny * S.refH;
+    // Convert to piece-relative [0..1]
+    const pieceNx = (refPx - refBounds.left) / refBounds.w;
+    const pieceNy = (refPy - refBounds.top) / refBounds.h;
+    // Convert to scan image pixels using scan bounds
+    const cx = Math.round(scanBounds.left + pieceNx * scanBounds.w);
+    const cy = Math.round(scanBounds.top + pieceNy * scanBounds.h);
+    mappedPositions[ref.id] = { x: cx, y: cy };
+
     const r = Math.round(searchPx), r2 = r * r;
     const x0 = Math.max(0, cx-r), x1 = Math.min(w-1, cx+r);
     const y0 = Math.max(0, cy-r), y1 = Math.min(h-1, cy+r);
@@ -1124,13 +1203,13 @@ function processScan(imgData, w, h) {
     (total > 0 && copper / total > 0.03 ? matched : missing).push(ref.id);
   });
 
-  showResults(imgData, w, h, matched, missing);
+  showResults(imgData, w, h, matched, missing, mappedPositions);
 }
 
 // ============================================================
 //  RESULTS
 // ============================================================
-function showResults(imgData, w, h, matched, missing) {
+function showResults(imgData, w, h, matched, missing, mappedPositions) {
   const canvas = document.getElementById('cv-res');
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
@@ -1139,7 +1218,10 @@ function showResults(imgData, w, h, matched, missing) {
   const searchPx = S.calib.searchR * (w / 400);
 
   S.bolts.forEach(ref => {
-    const bx = ref.nx * w, by = ref.ny * h;
+    // Use mapped (aligned) positions if available, otherwise raw
+    const pos = mappedPositions && mappedPositions[ref.id];
+    const bx = pos ? pos.x : ref.nx * w;
+    const by = pos ? pos.y : ref.ny * h;
     const isOk = matched.includes(ref.id);
     const isMiss = missing.includes(ref.id);
     const r = Math.max(searchPx * 0.5, 14);
