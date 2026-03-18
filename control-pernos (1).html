@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control de Pernos — B0001206C-C134-01</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f0e;
+    --surface: #141716;
+    --surface2: #1c1f1d;
+    --border: #2a2e2b;
+    --green: #00e676;
+    --green-dim: #00c85a;
+    --red: #ff3d3d;
+    --red-dim: #cc2222;
+    --amber: #ffab00;
+    --text: #e8ece9;
+    --text-dim: #7a8a7d;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Barlow', sans-serif;
+    --cond: 'Barlow Condensed', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* SCANLINE overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    border: 2px solid var(--green);
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .logo-icon::after {
+    content: '';
+    width: 10px; height: 10px;
+    background: var(--green);
+    border-radius: 50%;
+  }
+
+  .logo-text {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .logo-ref {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .status-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-dim);
+  }
+  .status-badge.ready .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 0;
+    height: calc(100vh - 65px);
+  }
+
+  /* LEFT: camera/preview */
+  .camera-zone {
+    position: relative;
+    background: #080a09;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .camera-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,230,118,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,230,118,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  #video, #preview-img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    position: relative;
+    z-index: 2;
+  }
+
+  #preview-img { display: none; }
+
+  .crosshair {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+  }
+  /* Corner brackets */
+  .corner { position: absolute; width: 24px; height: 24px; }
+  .corner.tl { top: 20px; left: 20px; border-top: 2px solid var(--green); border-left: 2px solid var(--green); }
+  .corner.tr { top: 20px; right: 20px; border-top: 2px solid var(--green); border-right: 2px solid var(--green); }
+  .corner.bl { bottom: 20px; left: 20px; border-bottom: 2px solid var(--green); border-left: 2px solid var(--green); }
+  .corner.br { bottom: 20px; right: 20px; border-bottom: 2px solid var(--green); border-right: 2px solid var(--green); }
+
+  .cam-label {
+    position: absolute;
+    top: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(0,230,118,0.5);
+    letter-spacing: 3px;
+    z-index: 4;
+  }
+
+  .overlay-result {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .overlay-result.show { opacity: 1; }
+
+  .result-big {
+    font-family: var(--cond);
+    font-weight: 900;
+    font-size: 120px;
+    letter-spacing: -4px;
+    text-shadow: 0 0 40px currentColor;
+    animation: pulse-result 1s ease-out;
+  }
+
+  @keyframes pulse-result {
+    0% { transform: scale(0.5); opacity: 0; }
+    60% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .result-big.ok { color: var(--green); }
+  .result-big.fail { color: var(--red); }
+
+  /* RIGHT: controls */
+  .panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .panel-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .config-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .config-label {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 300;
+  }
+  .config-value {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--amber);
+  }
+
+  input[type="text"], input[type="number"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 10px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus, input[type="number"]:focus {
+    border-color: var(--green);
+  }
+  input[type="number"] { width: 70px; text-align: center; }
+
+  .field-group { margin-bottom: 12px; }
+  .field-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+    font-weight: 300;
+  }
+
+  /* Big scan button */
+  .btn-scan {
+    width: 100%;
+    padding: 18px;
+    background: transparent;
+    border: 2px solid var(--green);
+    border-radius: 4px;
+    color: var(--green);
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.2s;
+  }
+  .btn-scan::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    transform: translateY(100%);
+    transition: transform 0.2s;
+  }
+  .btn-scan:hover { color: var(--bg); }
+  .btn-scan:hover::before { transform: translateY(0); }
+  .btn-scan span { position: relative; z-index: 1; }
+  .btn-scan:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: var(--text-dim);
+    color: var(--text-dim);
+  }
+  .btn-scan:disabled::before { display: none; }
+
+  .btn-secondary {
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: all 0.2s;
+  }
+  .btn-secondary:hover { border-color: var(--text-dim); color: var(--text); }
+
+  /* Result panel */
+  .result-panel {
+    padding: 20px;
+    display: none;
+  }
+  .result-panel.show { display: block; }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .result-status {
+    font-family: var(--cond);
+    font-weight: 900;
+    font-size: 42px;
+    letter-spacing: 1px;
+  }
+  .result-status.ok { color: var(--green); text-shadow: 0 0 20px var(--green); }
+  .result-status.fail { color: var(--red); text-shadow: 0 0 20px var(--red); }
+
+  .result-detail {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.8;
+    color: var(--text-dim);
+  }
+  .result-detail .hl { color: var(--text); }
+  .result-detail .hl.ok { color: var(--green); }
+  .result-detail .hl.fail { color: var(--red); }
+
+  .count-display {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    text-align: center;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .count-display::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  .count-display.ok::before { background: rgba(0,230,118,0.06); opacity: 1; }
+  .count-display.fail::before { background: rgba(255,61,61,0.06); opacity: 1; }
+
+  .count-num {
+    font-family: var(--cond);
+    font-weight: 900;
+    font-size: 64px;
+    line-height: 1;
+    position: relative;
+  }
+  .count-num.ok { color: var(--green); }
+  .count-num.fail { color: var(--red); }
+
+  .count-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    margin-top: 4px;
+  }
+
+  .count-expected {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+
+  .notes-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--amber);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    font-weight: 300;
+    margin-top: 12px;
+  }
+
+  /* Log */
+  .log {
+    padding: 16px 20px;
+    flex: 1;
+  }
+  .log-entry {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    display: flex;
+    gap: 8px;
+  }
+  .log-entry .ts { color: rgba(255,255,255,0.2); min-width: 60px; }
+  .log-entry.ok .msg { color: var(--green); }
+  .log-entry.fail .msg { color: var(--red); }
+  .log-entry.info .msg { color: var(--text-dim); }
+
+  /* Loading state */
+  .analyzing {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 20;
+    gap: 16px;
+  }
+  .analyzing.show { display: flex; }
+  .analyzing-text {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--green);
+    letter-spacing: 3px;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .spinner {
+    width: 40px; height: 40px;
+    border: 2px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Flash effect */
+  .flash {
+    position: absolute;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    z-index: 30;
+    pointer-events: none;
+    transition: opacity 0.05s;
+  }
+  .flash.trigger { opacity: 0.6; }
+
+  /* File upload zone */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-top: 8px;
+  }
+  .upload-zone:hover { border-color: var(--green); }
+  .upload-zone-text {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  #file-input { display: none; }
+
+  /* Camera select */
+  select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 8px;
+    width: 100%;
+    outline: none;
+  }
+
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .mode-tab {
+    flex: 1;
+    padding: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+  .mode-tab.active {
+    background: var(--surface2);
+    color: var(--green);
+  }
+
+  /* Confidence bar */
+  .confidence-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .confidence-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--green);
+    transition: width 0.5s ease;
+  }
+
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .panel { max-height: 50vh; }
+    header { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <div>
+      <div class="logo-text">Control de Pernos</div>
+      <div class="logo-ref">B0001206C-C134-01 · M4x12/M4x15 · 17 uds</div>
+    </div>
+  </div>
+  <div class="status-badge" id="status-badge">
+    <span class="dot"></span>
+    <span id="status-text">SIN CONFIGURAR</span>
+  </div>
+</header>
+
+<main>
+  <!-- Camera / preview area -->
+  <div class="camera-zone">
+    <div class="camera-grid"></div>
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+    <div class="cam-label" id="cam-label">ESPERANDO CÁMARA</div>
+
+    <video id="video" autoplay playsinline muted></video>
+    <img id="preview-img" alt="Imagen capturada">
+
+    <div class="flash" id="flash"></div>
+
+    <div class="analyzing" id="analyzing">
+      <div class="spinner"></div>
+      <div class="analyzing-text">ANALIZANDO...</div>
+    </div>
+
+    <div class="overlay-result" id="overlay-result">
+      <div class="result-big" id="overlay-text"></div>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="panel">
+
+    <!-- API Key -->
+    <div class="panel-section">
+      <div class="section-label">Configuración API</div>
+      <div class="field-group">
+        <div class="field-label">Gemini API Key (gratuita)</div>
+        <input type="text" id="api-key" placeholder="AIza..." autocomplete="off">
+        <div style="font-size:10px;color:var(--text-dim);margin-top:5px;">
+          Obtén tu key gratis en <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--green);text-decoration:none;">aistudio.google.com</a>
+        </div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Modelo</div>
+        <select id="model-select">
+          <option value="gemini-2.5-flash-preview-05-20">Gemini 2.5 Flash (recomendado)</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+          <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B (más ligero)</option>
+        </select>
+      </div>
+      <button class="btn-secondary" id="btn-test-key" onclick="testApiKey()" style="margin-top:0;">⚡ Probar conexión API</button>
+      <div id="key-status" style="font-family:var(--mono);font-size:10px;margin-top:6px;display:none;padding:6px 8px;border-radius:3px;"></div>
+    </div>
+
+    <!-- Pieza config -->
+    <div class="panel-section">
+      <div class="section-label">Parámetros pieza</div>
+      <div class="config-row">
+        <span class="config-label">Referencia</span>
+        <span class="config-value" style="font-size:10px;">C134-01</span>
+      </div>
+      <div class="config-row">
+        <span class="config-label">Pernos esperados</span>
+        <input type="number" id="expected-count" value="17" min="1" max="99" style="width:60px;">
+      </div>
+      <div class="config-row" style="margin-top:8px;">
+        <span class="config-label">Tipo perno</span>
+        <span class="config-value">M4×12/15</span>
+      </div>
+    </div>
+
+    <!-- Modo captura -->
+    <div class="panel-section">
+      <div class="section-label">Fuente de imagen</div>
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tab-cam" onclick="setMode('camera')">CÁMARA</button>
+        <button class="mode-tab" id="tab-file" onclick="setMode('file')">ARCHIVO</button>
+      </div>
+
+      <div id="cam-controls">
+        <div class="field-group">
+          <div class="field-label">Seleccionar cámara</div>
+          <select id="camera-select" onchange="startCamera()">
+            <option value="">-- Iniciando... --</option>
+          </select>
+        </div>
+        <button class="btn-scan" id="btn-capture" onclick="captureAndAnalyze()" disabled>
+          <span>▶ ESCANEAR</span>
+        </button>
+      </div>
+
+      <div id="file-controls" style="display:none;">
+        <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+          <div class="upload-zone-text">📁 Pulsa para seleccionar imagen<br><span style="font-size:10px;opacity:0.6;">JPG, PNG</span></div>
+        </div>
+        <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(event)">
+        <button class="btn-scan" id="btn-analyze-file" onclick="analyzeCurrentImage()" disabled style="margin-top:8px;">
+          <span>▶ ANALIZAR</span>
+        </button>
+      </div>
+
+      <button class="btn-secondary" onclick="resetScan()">↺ Nuevo escaneo</button>
+    </div>
+
+    <!-- Result -->
+    <div class="result-panel" id="result-panel">
+      <div class="section-label">Resultado</div>
+
+      <div class="count-display" id="count-display">
+        <div class="count-num" id="count-num">—</div>
+        <div class="count-label">PERNOS DETECTADOS</div>
+        <div class="count-expected" id="count-expected"></div>
+        <div class="confidence-bar">
+          <div class="confidence-fill" id="conf-fill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="result-header">
+        <div class="result-status" id="result-status-text"></div>
+      </div>
+
+      <div class="result-detail" id="result-detail"></div>
+      <div class="notes-box" id="notes-box" style="display:none;"></div>
+    </div>
+
+    <!-- Log -->
+    <div class="log">
+      <div class="section-label" style="margin-bottom:8px;">Historial</div>
+      <div id="log-entries"></div>
+    </div>
+
+  </div>
+</main>
+
+<audio id="snd-ok" style="display:none;"></audio>
+<audio id="snd-fail" style="display:none;"></audio>
+
+<script>
+// ─── State ───────────────────────────────────────────────
+let stream = null;
+let currentMode = 'camera';
+let currentImageB64 = null;
+let currentImageMime = 'image/jpeg';
+
+// ─── Sounds (Web Audio API - no files needed) ────────────
+function playOK() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const t = ctx.currentTime;
+  [523, 659, 784].forEach((freq, i) => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.3, t + i * 0.12);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.25);
+    o.start(t + i * 0.12);
+    o.stop(t + i * 0.12 + 0.3);
+  });
+}
+
+function playFail() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const t = ctx.currentTime;
+  [220, 180].forEach((freq, i) => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sawtooth';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.4, t + i * 0.2);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.2 + 0.35);
+    o.start(t + i * 0.2);
+    o.stop(t + i * 0.2 + 0.4);
+  });
+}
+
+// ─── Camera ──────────────────────────────────────────────
+async function initCameras() {
+  try {
+    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    tempStream.getTracks().forEach(t => t.stop());
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const sel = document.getElementById('camera-select');
+    sel.innerHTML = cams.map((c, i) =>
+      `<option value="${c.deviceId}">${c.label || 'Cámara ' + (i+1)}</option>`
+    ).join('');
+    startCamera();
+  } catch(e) {
+    addLog('info', 'Sin acceso a cámara — usa modo archivo');
+    setMode('file');
+  }
+}
+
+async function startCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); }
+  const deviceId = document.getElementById('camera-select').value;
+  try {
+    const constraints = {
+      video: deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        : { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: 'environment' }
+    };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    document.getElementById('cam-label').textContent = 'EN VIVO';
+    document.getElementById('btn-capture').disabled = false;
+    checkReady();
+  } catch(e) {
+    addLog('info', 'Error cámara: ' + e.message);
+  }
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('tab-cam').classList.toggle('active', mode === 'camera');
+  document.getElementById('tab-file').classList.toggle('active', mode === 'file');
+  document.getElementById('cam-controls').style.display = mode === 'camera' ? 'block' : 'none';
+  document.getElementById('file-controls').style.display = mode === 'file' ? 'block' : 'none';
+  if (mode === 'camera') initCameras();
+}
+
+// ─── Capture ─────────────────────────────────────────────
+async function captureAndAnalyze() {
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  // Flash effect
+  const flash = document.getElementById('flash');
+  flash.classList.add('trigger');
+  setTimeout(() => flash.classList.remove('trigger'), 150);
+
+  currentImageMime = 'image/jpeg';
+  currentImageB64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+
+  // Show captured frame
+  const img = document.getElementById('preview-img');
+  img.src = canvas.toDataURL('image/jpeg', 0.92);
+  img.style.display = 'block';
+  video.style.display = 'none';
+  document.getElementById('cam-label').textContent = 'CAPTURADO';
+
+  await analyzeCurrentImage();
+}
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    currentImageMime = file.type || 'image/jpeg';
+    currentImageB64 = dataUrl.split(',')[1];
+
+    const img = document.getElementById('preview-img');
+    img.src = dataUrl;
+    img.style.display = 'block';
+    document.getElementById('video').style.display = 'none';
+    document.getElementById('cam-label').textContent = 'IMAGEN CARGADA';
+    document.getElementById('btn-analyze-file').disabled = false;
+    addLog('info', 'Imagen cargada: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─── Gemini Analysis ─────────────────────────────────────
+async function analyzeCurrentImage() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (!apiKey) { alert('Introduce tu Gemini API Key'); return; }
+  if (!currentImageB64) { alert('No hay imagen para analizar'); return; }
+
+  const expected = parseInt(document.getElementById('expected-count').value) || 17;
+
+  document.getElementById('analyzing').classList.add('show');
+  document.getElementById('overlay-result').classList.remove('show');
+  document.getElementById('result-panel').classList.remove('show');
+
+  const prompt = `Eres un inspector de calidad en una fábrica de piezas metálicas.
+
+En esta imagen hay una chapa metálica plana (color gris/aluminio). Sobre ella hay pernos soldados M4 (pernos de proyección soldados). Los pernos son pequeños vástagos cilíndricos metálicos que sobresalen de la superficie, normalmente de color cobrizo/dorado o metálico brillante, visibles como pequeños puntos o protuberancias cortas.
+
+IMPORTANTE: 
+- Cuenta SOLO los pernos soldados M4 visibles en la cara plana principal de la pieza
+- No cuentes tornillos de fijación del utillaje, ni agujeros, ni remaches decorativos
+- Los pernos M4 soldados son pequeños (aprox 4mm diámetro) y sobresalen de la superficie
+
+Responde ÚNICAMENTE en JSON válido, sin texto adicional:
+{
+  "pernos_detectados": <número entero>,
+  "confianza": "alta|media|baja",
+  "ubicaciones": ["descripción zona 1", "descripción zona 2", ...],
+  "observaciones": "texto breve sobre condiciones de imagen o dudas"
+}`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${document.getElementById('model-select').value}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inline_data: { mime_type: currentImageMime, data: currentImageB64 } },
+              { text: prompt }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 500 }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || 'Error API ' + response.status);
+    }
+
+    const data = await response.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Parse JSON (strip markdown if present)
+    const clean = raw.replace(/```json|```/g, '').trim();
+    let result;
+    try {
+      result = JSON.parse(clean);
+    } catch(e) {
+      throw new Error('Respuesta no válida de la API: ' + raw.substring(0, 100));
+    }
+
+    showResult(result, expected);
+
+  } catch(e) {
+    document.getElementById('analyzing').classList.remove('show');
+    addLog('info', 'Error: ' + e.message);
+    alert('Error al analizar: ' + e.message);
+  }
+}
+
+// ─── Show Result ─────────────────────────────────────────
+function showResult(result, expected) {
+  document.getElementById('analyzing').classList.remove('show');
+
+  const detected = result.pernos_detectados;
+  const isOK = detected === expected;
+  const conf = result.confianza || 'media';
+  const confPct = conf === 'alta' ? 95 : conf === 'media' ? 65 : 35;
+
+  // Big overlay
+  const overlay = document.getElementById('overlay-result');
+  const overlayText = document.getElementById('overlay-text');
+  overlayText.textContent = isOK ? 'OK' : 'NOK';
+  overlayText.className = 'result-big ' + (isOK ? 'ok' : 'fail');
+  overlay.classList.add('show');
+  setTimeout(() => overlay.classList.remove('show'), 2500);
+
+  // Sound
+  if (isOK) playOK(); else playFail();
+
+  // Panel
+  const panel = document.getElementById('result-panel');
+  panel.classList.add('show');
+
+  const countDisplay = document.getElementById('count-display');
+  countDisplay.className = 'count-display ' + (isOK ? 'ok' : 'fail');
+
+  document.getElementById('count-num').textContent = detected;
+  document.getElementById('count-num').className = 'count-num ' + (isOK ? 'ok' : 'fail');
+  document.getElementById('count-expected').textContent = `Esperados: ${expected}`;
+  document.getElementById('conf-fill').style.width = confPct + '%';
+
+  document.getElementById('result-status-text').textContent = isOK ? '✓ CORRECTO' : '✗ ERROR';
+  document.getElementById('result-status-text').className = 'result-status ' + (isOK ? 'ok' : 'fail');
+
+  // Detail
+  const missing = expected - detected;
+  let detailHtml = `<span class="hl">Detectados:</span> <span class="hl ${isOK?'ok':'fail'}">${detected}</span> / ${expected}<br>`;
+  if (!isOK) {
+    detailHtml += `<span class="hl fail">Faltan: ${Math.abs(missing)} pernos</span><br>`;
+  }
+  detailHtml += `Confianza IA: <span class="hl">${conf.toUpperCase()}</span><br>`;
+
+  if (result.ubicaciones && result.ubicaciones.length > 0) {
+    detailHtml += `<br>Ubicaciones:<br>`;
+    result.ubicaciones.slice(0, 6).forEach(u => {
+      detailHtml += `· ${u}<br>`;
+    });
+  }
+
+  document.getElementById('result-detail').innerHTML = detailHtml;
+
+  if (result.observaciones) {
+    const nb = document.getElementById('notes-box');
+    nb.textContent = '⚠ ' + result.observaciones;
+    nb.style.display = 'block';
+  }
+
+  // Log
+  const ts = new Date().toLocaleTimeString('es', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  addLog(isOK ? 'ok' : 'fail',
+    `${isOK ? 'OK' : 'NOK'} — ${detected}/${expected} pernos — confianza ${conf}`
+  );
+
+  checkReady();
+  updateStatusBadge();
+}
+
+// ─── Reset ────────────────────────────────────────────────
+function resetScan() {
+  const video = document.getElementById('video');
+  const img = document.getElementById('preview-img');
+  img.style.display = 'none';
+  video.style.display = 'block';
+  document.getElementById('cam-label').textContent = 'EN VIVO';
+  document.getElementById('result-panel').classList.remove('show');
+  document.getElementById('overlay-result').classList.remove('show');
+  document.getElementById('notes-box').style.display = 'none';
+  currentImageB64 = null;
+  if (currentMode === 'camera' && stream) {
+    // Camera already running
+  }
+}
+
+// ─── Utils ────────────────────────────────────────────────
+function addLog(type, msg) {
+  const ts = new Date().toLocaleTimeString('es', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + type;
+  div.innerHTML = `<span class="ts">${ts}</span><span class="msg">${msg}</span>`;
+  const container = document.getElementById('log-entries');
+  container.insertBefore(div, container.firstChild);
+  if (container.children.length > 20) container.lastChild.remove();
+}
+
+function checkReady() {
+  const hasKey = document.getElementById('api-key').value.trim().length > 10;
+  document.getElementById('btn-capture').disabled = !hasKey || !stream;
+  updateStatusBadge();
+}
+
+function updateStatusBadge() {
+  const badge = document.getElementById('status-badge');
+  const text = document.getElementById('status-text');
+  const hasKey = document.getElementById('api-key').value.trim().length > 10;
+  const hasCamera = !!stream;
+  if (hasKey && hasCamera) {
+    badge.className = 'status-badge ready';
+    text.textContent = 'LISTO';
+  } else if (hasKey) {
+    badge.className = 'status-badge';
+    text.textContent = 'SIN CÁMARA';
+  } else {
+    badge.className = 'status-badge';
+    text.textContent = 'SIN API KEY';
+  }
+}
+
+// ─── Test API Key ─────────────────────────────────────────
+async function testApiKey() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (!apiKey) { alert('Introduce primero la API Key'); return; }
+  const model = document.getElementById('model-select').value;
+  const btn = document.getElementById('btn-test-key');
+  const status = document.getElementById('key-status');
+  btn.textContent = '⏳ Probando...';
+  btn.disabled = true;
+  status.style.display = 'none';
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Di solo: OK' }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 5 }
+        })
+      }
+    );
+    if (res.ok) {
+      status.textContent = '✓ Conexión correcta — API key válida con ' + model;
+      status.style.background = 'rgba(0,230,118,0.1)';
+      status.style.color = 'var(--green)';
+      status.style.border = '1px solid rgba(0,230,118,0.3)';
+      addLog('ok', 'API key válida — modelo: ' + model);
+      checkReady();
+    } else {
+      const err = await res.json();
+      const msg = err.error?.message || 'Error desconocido';
+      status.textContent = '✗ ' + msg;
+      status.style.background = 'rgba(255,61,61,0.1)';
+      status.style.color = 'var(--red)';
+      status.style.border = '1px solid rgba(255,61,61,0.3)';
+      addLog('fail', 'API error: ' + msg.substring(0, 60));
+    }
+  } catch(e) {
+    status.textContent = '✗ Sin conexión: ' + e.message;
+    status.style.background = 'rgba(255,61,61,0.1)';
+    status.style.color = 'var(--red)';
+    status.style.border = '1px solid rgba(255,61,61,0.3)';
+  }
+  status.style.display = 'block';
+  btn.textContent = '⚡ Probar conexión API';
+  btn.disabled = false;
+}
+
+// ─── Init ─────────────────────────────────────────────────
+document.getElementById('api-key').addEventListener('input', checkReady);
+document.getElementById('expected-count').addEventListener('input', checkReady);
+
+addLog('info', 'Sistema iniciado — introduce API key');
+initCameras();
+</script>
+</body>
+</html>
