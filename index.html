@@ -603,7 +603,117 @@ function autoDetect() {
   }
 
   // Keep only the top N (target count) best candidates
-  const final = deduped.slice(0, S.targetCount);
+  let final = deduped.slice(0, S.targetCount);
+
+  // --- ADAPTIVE SECOND PASS ---
+  // If we found fewer than target, learn from what we found and search again with relaxed thresholds
+  if (final.length > 0 && final.length < S.targetCount) {
+    // Learn color profile from detected bolts
+    const hsvSamples = [];
+    const avgRadius = final.reduce((s, b) => s + b.r, 0) / final.length;
+    final.forEach(b => {
+      const sampleR = Math.round(b.r * 0.6);
+      for (let dy = -sampleR; dy <= sampleR; dy++) {
+        for (let dx = -sampleR; dx <= sampleR; dx++) {
+          if (dx*dx + dy*dy > sampleR*sampleR) continue;
+          const sx = Math.round(b.x + dx), sy = Math.round(b.y + dy);
+          if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+          const pi = (sy * w + sx) * 4;
+          hsvSamples.push(rgb2hsv(d[pi], d[pi+1], d[pi+2]));
+        }
+      }
+    });
+
+    if (hsvSamples.length > 20) {
+      // Compute actual HSV range from found bolts with generous margin
+      const allH = hsvSamples.map(x => x[0]).sort((a,b) => a-b);
+      const allS = hsvSamples.map(x => x[1]).sort((a,b) => a-b);
+      const allV = hsvSamples.map(x => x[2]).sort((a,b) => a-b);
+      // Use percentile 5-95 to ignore outliers
+      const p5 = Math.floor(allH.length * 0.05), p95 = Math.floor(allH.length * 0.95);
+      const learnedH = [allH[p5], allH[p95]];
+      const learnedS = [allS[p5], allS[p95]];
+      const learnedV = [allV[p5], allV[p95]];
+
+      // Relaxed thresholds based on learned profile
+      const rCal = {
+        hMin: Math.max(0, Math.floor(learnedH[0] - 8)),
+        hMax: Math.min(180, Math.ceil(learnedH[1] + 8)),
+        sMin: Math.max(0, Math.floor(learnedS[0] - 30)),
+        vMin: Math.max(0, Math.floor(learnedV[0] - 40)),
+        // Relaxed area based on found bolts
+        aMin: Math.max(30, Math.floor(avgRadius * avgRadius * Math.PI * 0.2)),
+        aMax: Math.ceil(avgRadius * avgRadius * Math.PI * 5),
+      };
+
+      // Build new mask with relaxed thresholds
+      const mask2 = new Uint8Array(w * h);
+      for (let i = 0; i < d.length; i += 4) {
+        const [hue, sat, val] = rgb2hsv(d[i], d[i+1], d[i+2]);
+        let inR = hue >= rCal.hMin && hue <= rCal.hMax && sat >= rCal.sMin && val >= rCal.vMin;
+        if (!inR && rCal.hMin < 10) inR = hue >= 170 && sat >= rCal.sMin && val >= rCal.vMin;
+        if (inR) mask2[i >> 2] = 1;
+      }
+
+      // Morphological close
+      const dil2 = new Uint8Array(w * h);
+      for (let py = 1; py < h-1; py++) for (let px = 1; px < w-1; px++) {
+        const idx = py*w+px;
+        if (mask2[idx]||mask2[idx-1]||mask2[idx+1]||mask2[idx-w]||mask2[idx+w]||
+            mask2[idx-w-1]||mask2[idx-w+1]||mask2[idx+w-1]||mask2[idx+w+1]) dil2[idx]=1;
+      }
+      const cls2 = new Uint8Array(w * h);
+      for (let py = 1; py < h-1; py++) for (let px = 1; px < w-1; px++) {
+        const idx = py*w+px;
+        if (dil2[idx]&&dil2[idx-1]&&dil2[idx+1]&&dil2[idx-w]&&dil2[idx+w]) cls2[idx]=1;
+      }
+
+      // Flood-fill with relaxed size filter but stricter shape (must be similar to found bolts)
+      const vis2 = new Uint8Array(w * h);
+      const extra = [];
+      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+        const idx = py*w+px;
+        if (!cls2[idx] || vis2[idx]) continue;
+        const queue = [idx]; vis2[idx] = 1;
+        let sx2=0,sy2=0,cnt=0,x0b=px,x1b=px,y0b=py,y1b=py;
+        while (queue.length) {
+          const ci=queue.pop(),cx2=ci%w,cy2=(ci-cx2)/w;
+          sx2+=cx2;sy2+=cy2;cnt++;
+          if(cx2<x0b)x0b=cx2;if(cx2>x1b)x1b=cx2;if(cy2<y0b)y0b=cy2;if(cy2>y1b)y1b=cy2;
+          const nb=[cy2>0?ci-w:-1,cy2<h-1?ci+w:-1,cx2>0?ci-1:-1,cx2<w-1?ci+1:-1];
+          for(const ni of nb){if(ni>=0&&cls2[ni]&&!vis2[ni]){vis2[ni]=1;queue.push(ni);}}
+        }
+        if (cnt < rCal.aMin || cnt > rCal.aMax) continue;
+        const bw2=x1b-x0b+1, bh2=y1b-y0b+1;
+        const aspect2=Math.min(bw2,bh2)/Math.max(bw2,bh2);
+        if (aspect2 < 0.4) continue;
+        const bcR2=Math.max(bw2,bh2)/2;
+        const comp2=cnt/(Math.PI*bcR2*bcR2);
+        if (comp2 < 0.3) continue;
+        const ecx=sx2/cnt, ecy=sy2/cnt, er=Math.sqrt(cnt/Math.PI);
+        // Size must be similar to found bolts (within 3x)
+        if (er < avgRadius * 0.3 || er > avgRadius * 3) continue;
+        // Must not overlap with already found bolts
+        const overlap = final.some(f => Math.sqrt((f.x-ecx)**2+(f.y-ecy)**2) < Math.max(f.r,er)*1.5);
+        if (overlap) continue;
+        extra.push({ x:ecx, y:ecy, r:er, area:cnt, compactness:comp2, gradientScore:0 });
+      }
+
+      // Sort extras by how similar their radius is to the average
+      extra.sort((a,b) => Math.abs(a.r-avgRadius) - Math.abs(b.r-avgRadius));
+
+      // Dedupe extras
+      const extraDeduped = [];
+      for (const b of extra) {
+        const tooClose = extraDeduped.some(f => Math.sqrt((f.x-b.x)**2+(f.y-b.y)**2) < Math.max(f.r,b.r)*1.5);
+        if (!tooClose) extraDeduped.push(b);
+      }
+
+      // Add extras until we reach target
+      const needed = S.targetCount - final.length;
+      final = final.concat(extraDeduped.slice(0, needed));
+    }
+  }
 
   // Sort spatially: top-to-bottom, left-to-right
   const rowH = h * 0.06;
