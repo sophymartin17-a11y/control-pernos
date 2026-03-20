@@ -229,6 +229,7 @@ input[type=file]{display:none;}
         Coloca la pieza en la misma posicion<br>que la referencia y haz la foto
       </div>
       <button class="btn-big" onclick="startScan()" style="font-size:18px;">ESCANEAR PIEZA</button>
+      <button class="btn-sec" onclick="document.getElementById('input-scan-file').click()" style="margin-top:10px;">CARGAR IMAGEN (TEST)</button>
       <div style="margin-top:14px;display:flex;gap:10px;">
         <button class="btn-sec" onclick="triggerInput('ref')" style="flex:1;">NUEVA REF</button>
         <button class="btn-sec" onclick="showScreen('history')" style="flex:1;">HISTORIAL</button>
@@ -270,6 +271,7 @@ input[type=file]{display:none;}
 <!-- Hidden inputs — NO capture attribute for iOS compatibility -->
 <input type="file" id="input-ref" accept="image/*" capture="environment" onchange="onPhoto(this,'ref')">
 <input type="file" id="input-scan-native" accept="image/*" capture="environment" onchange="onPhoto(this,'scan')">
+<input type="file" id="input-scan-file" accept="image/*" onchange="onScanFile(this)">
 <canvas id="cv-work" style="display:none;"></canvas>
 
 <script>
@@ -987,6 +989,26 @@ function goInspect() {
 // (scanStream, overlayRAF, refImageObj declared at top of scan section)
 
 
+function onScanFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.getElementById('cv-work');
+      cv.width = img.width; cv.height = img.height;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, cv.width, cv.height);
+      processScan(imgData, cv.width, cv.height);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 async function startScan() {
   try {
     scanStream = await navigator.mediaDevices.getUserMedia({
@@ -1187,6 +1209,10 @@ function processScan(imgData, w, h) {
     const r = Math.round(searchPx), r2 = r * r;
     const x0 = Math.max(0, cx-r), x1 = Math.min(w-1, cx+r);
     const y0 = Math.max(0, cy-r), y1 = Math.min(h-1, cy+r);
+
+    // ── STEP 1: COLOR — build mask of matching pixels ──
+    const zoneW = x1 - x0 + 1, zoneH = y1 - y0 + 1;
+    const mask = new Uint8Array(zoneW * zoneH);
     let copper = 0, total = 0;
 
     for (let py = y0; py <= y1; py++) {
@@ -1197,10 +1223,69 @@ function processScan(imgData, w, h) {
         const [hue, sat, val] = rgb2hsv(d[i], d[i+1], d[i+2]);
         let inR = hue >= cal.hMin && hue <= cal.hMax && sat >= cal.sMin && val >= cal.vMin;
         if (!inR && cal.hMin < 10) inR = hue >= 170 && sat >= cal.sMin && val >= cal.vMin;
-        if (inR) copper++;
+        if (inR) {
+          copper++;
+          mask[(py - y0) * zoneW + (px - x0)] = 1;
+        }
       }
     }
-    (total > 0 && copper / total > 0.03 ? matched : missing).push(ref.id);
+
+    const colorRatio = total > 0 ? copper / total : 0;
+    const hasColor = colorRatio > 0.03;
+
+    // ── STEP 2: CIRCLE — check if color pixels form a compact round blob ──
+    let hasCircle = false;
+    if (hasColor) {
+      // Flood-fill the largest blob in the mask
+      const visited = new Uint8Array(zoneW * zoneH);
+      let bestBlob = null;
+      for (let my = 0; my < zoneH; my++) {
+        for (let mx = 0; mx < zoneW; mx++) {
+          const mi = my * zoneW + mx;
+          if (!mask[mi] || visited[mi]) continue;
+          visited[mi] = 1;
+          const queue = [mi];
+          let sx = 0, sy = 0, cnt = 0;
+          let bx0 = mx, bx1 = mx, by0 = my, by1 = my;
+          while (queue.length) {
+            const ci = queue.pop();
+            const bx = ci % zoneW, by = (ci - bx) / zoneW;
+            sx += bx; sy += by; cnt++;
+            if (bx < bx0) bx0 = bx; if (bx > bx1) bx1 = bx;
+            if (by < by0) by0 = by; if (by > by1) by1 = by;
+            const neighbors = [
+              by > 0 ? ci - zoneW : -1,
+              by < zoneH-1 ? ci + zoneW : -1,
+              bx > 0 ? ci - 1 : -1,
+              bx < zoneW-1 ? ci + 1 : -1
+            ];
+            for (const ni of neighbors) {
+              if (ni >= 0 && mask[ni] && !visited[ni]) {
+                visited[ni] = 1;
+                queue.push(ni);
+              }
+            }
+          }
+          if (!bestBlob || cnt > bestBlob.cnt) {
+            bestBlob = { cnt, sx, sy, bx0, bx1, by0, by1 };
+          }
+        }
+      }
+
+      if (bestBlob && bestBlob.cnt >= 8) {
+        const bw = bestBlob.bx1 - bestBlob.bx0 + 1;
+        const bh = bestBlob.by1 - bestBlob.by0 + 1;
+        // Aspect ratio: circle should be roughly square (> 0.4)
+        const aspect = Math.min(bw, bh) / Math.max(bw, bh);
+        // Compactness: area vs bounding box area (circle ≈ π/4 ≈ 0.78)
+        const fillRatio = bestBlob.cnt / (bw * bh);
+        // A circle has fillRatio ≈ 0.5-0.9 and aspect > 0.4
+        hasCircle = aspect > 0.4 && fillRatio > 0.3;
+      }
+    }
+
+    // ── DECISION: both color AND circle must match ──
+    (hasColor && hasCircle ? matched : missing).push(ref.id);
   });
 
   showResults(imgData, w, h, matched, missing, mappedPositions);
