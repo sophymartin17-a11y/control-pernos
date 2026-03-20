@@ -1190,6 +1190,23 @@ function processScan(imgData, w, h) {
   }
   const refBounds = S._refBounds || { left:0, top:0, right:S.refW-1, bottom:S.refH-1, w:S.refW, h:S.refH };
 
+  // ── Learn expected bolt size from reference ──
+  // Scale factor: how the piece scales from ref image to scan image
+  const scaleX = scanBounds.w / refBounds.w;
+  const scaleY = scanBounds.h / refBounds.h;
+  const scaleFactor = (scaleX + scaleY) / 2;
+
+  // Average bolt radius from reference, scaled to scan image
+  const refRadii = S.bolts.map(b => b.r).filter(r => r > 0);
+  const avgRefRadius = refRadii.length > 0
+    ? refRadii.reduce((a, b) => a + b, 0) / refRadii.length
+    : 15;
+  const expectedRadius = avgRefRadius * scaleFactor;
+  const expectedArea = Math.PI * expectedRadius * expectedRadius;
+  // Tolerance: bolt can be 25%-400% of expected area
+  const minBlobArea = Math.max(20, Math.round(expectedArea * 0.25));
+  const maxBlobArea = Math.round(expectedArea * 4);
+
   // For each bolt, convert ref position → piece-relative → scan position
   const searchPx = cal.searchR * (w / 400);
   const mappedPositions = {}; // id → {x, y} in scan pixels
@@ -1231,14 +1248,16 @@ function processScan(imgData, w, h) {
     }
 
     const colorRatio = total > 0 ? copper / total : 0;
-    const hasColor = colorRatio > 0.03;
+    const hasColor = colorRatio > 0.06; // 6% minimum (was 3%)
 
-    // ── STEP 2: CIRCLE — check if color pixels form a compact round blob ──
+    // ── STEP 2: CIRCLE — find best blob matching bolt shape+size ──
     let hasCircle = false;
     if (hasColor) {
-      // Flood-fill the largest blob in the mask
+      // Flood-fill all blobs in the mask
       const visited = new Uint8Array(zoneW * zoneH);
       let bestBlob = null;
+      let bestScore = -1;
+
       for (let my = 0; my < zoneH; my++) {
         for (let mx = 0; mx < zoneW; mx++) {
           const mi = my * zoneW + mx;
@@ -1266,22 +1285,32 @@ function processScan(imgData, w, h) {
               }
             }
           }
-          if (!bestBlob || cnt > bestBlob.cnt) {
-            bestBlob = { cnt, sx, sy, bx0, bx1, by0, by1 };
+
+          // ── Filter by size: must be within expected bolt area range ──
+          if (cnt < minBlobArea || cnt > maxBlobArea) continue;
+
+          const bw = bx1 - bx0 + 1;
+          const bh = by1 - by0 + 1;
+          // Aspect ratio: circle should be roughly square (> 0.5)
+          const aspect = Math.min(bw, bh) / Math.max(bw, bh);
+          if (aspect < 0.5) continue;
+          // Compactness: area vs bounding box (circle ≈ π/4 ≈ 0.78)
+          const fillRatio = cnt / (bw * bh);
+          if (fillRatio < 0.4) continue;
+
+          // Score: prefer blobs closer to expected size and more circular
+          const blobRadius = Math.sqrt(cnt / Math.PI);
+          const sizeSimilarity = 1 - Math.abs(blobRadius - expectedRadius) / expectedRadius;
+          const score = sizeSimilarity * fillRatio * aspect;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestBlob = { cnt, bw, bh, aspect, fillRatio };
           }
         }
       }
 
-      if (bestBlob && bestBlob.cnt >= 8) {
-        const bw = bestBlob.bx1 - bestBlob.bx0 + 1;
-        const bh = bestBlob.by1 - bestBlob.by0 + 1;
-        // Aspect ratio: circle should be roughly square (> 0.4)
-        const aspect = Math.min(bw, bh) / Math.max(bw, bh);
-        // Compactness: area vs bounding box area (circle ≈ π/4 ≈ 0.78)
-        const fillRatio = bestBlob.cnt / (bw * bh);
-        // A circle has fillRatio ≈ 0.5-0.9 and aspect > 0.4
-        hasCircle = aspect > 0.4 && fillRatio > 0.3;
-      }
+      hasCircle = bestBlob !== null;
     }
 
     // ── DECISION: both color AND circle must match ──
